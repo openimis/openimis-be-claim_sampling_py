@@ -1,0 +1,23 @@
+Metadata-Version: 2.1
+Name: openimis-be-claim-sampling
+Version: 1.0.0
+Summary: The openIMIS Backend claim_sampling reference module.
+Home-page: https://openimis.org/
+Author: author_email=wzgliniecki@soldevelo.com
+Author-email: author=wzgliniecki
+License: GNU AGPL v3
+Platform: UNKNOWN
+Classifier: Environment :: Web Environment
+Classifier: Framework :: Django
+Classifier: Framework :: Django :: 3.0
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: GNU Affero General Public License v3
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE.md
+
+# openIMIS Backend claim_sampling reference module
+
+
