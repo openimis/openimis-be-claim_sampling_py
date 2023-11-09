@@ -3,10 +3,10 @@ from django.apps import AppConfig
 MODULE_NAME = 'claim_sampling'
 
 DEFAULT_CFG = {
-    "gql_query_claim_batch_samplings_perms": ["123001"],
-    "gql_mutation_create_claim_batch_samplings_perms": ["123002"],
-    "gql_mutation_update_claim_batch_samplings_perms": ["123003"],
-    "gql_mutation_approve_claim_batch_samplings_perms": ["123004"],
+    "gql_query_claim_batch_samplings_perms": ["126001"],
+    "gql_mutation_create_claim_batch_samplings_perms": ["126002"],
+    "gql_mutation_update_claim_batch_samplings_perms": ["126003"],
+    "gql_mutation_approve_claim_batch_samplings_perms": ["126004"],
 }
 
 
