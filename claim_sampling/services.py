@@ -93,3 +93,32 @@ def get_claims_from_data_helper(kwargs):
         query = query.filter(**kwargs)
 
     return query.filter(validity_to__isnull=True)
+
+
+def create_review_task(**kwargs):
+    user = kwargs['user']
+    claims = kwargs['claims']
+    batch = kwargs['batch']
+
+    from tasks_management.services import TaskService
+
+    result = TaskService(user).create({
+        'source': "Claim Sampling",
+        'entity': batch,
+        'executor_action_event': "claim_sampling_resolve", # event jak user coś kliknie
+        'business_event': "claim_sampling_complete", # event jak wszystkie akcje od userów są zakończone, powinno być odpaone przez resolve
+        # 'task_group': TaskGroup, chyba wymagane na froncie
+        'data': { # statyczne dane do taska
+            'claims': claims
+        }
+        # 'business_status': puste przy tworzeniu taska, dynamiczne dane dodawane przy resolve
+        # {
+        #     'claimid': {
+        #         'accepted': True,
+        #         'klucz': 'wartość'
+        #     }
+        # }
+    })
+
+    if not result.get('success', False):
+        raise Exception("asdasd")
