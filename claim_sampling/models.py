@@ -19,6 +19,9 @@ class ClaimSamplingBatch(core_models.VersionedModel):
         managed = True
         db_table = "claim_ClaimSamplingBatch"
 
+    def __str__(self):
+        return "Batch id: " + str(self.id)
+
 
 class ClaimSamplingBatchAssignment(core_models.VersionedModel):
     class Status(models.TextChoices):
@@ -40,3 +43,6 @@ class ClaimSamplingBatchAssignment(core_models.VersionedModel):
 
     def set_claim_as_reviewed(self):
         self.status = self.Status.REVIEWED
+
+    def __str__(self):
+        return "Batch Assignment id: " + str(self.id)
