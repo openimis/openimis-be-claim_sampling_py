@@ -5,6 +5,7 @@ import base64
 from typing import Callable, Dict
 import random
 import graphene
+import json
 
 from .apps import ClaimSamplingConfig
 from core.schema import TinyInt, OpenIMISMutation
@@ -55,13 +56,11 @@ class ClaimSamplingBatchInputType(OpenIMISMutation.Input):
     feedback_available = graphene.Boolean(default=False)
     feedback_status = TinyInt(required=False)
     care_type = graphene.String(required=False)
+    filters = graphene.JSONString(required=False)
 
     # code = graphene.Field(ClaimCodeInputType, required=True)
     # feedback = graphene.Field(FeedbackInputType, required=False)
     # guarantee_id = ClaimGuaranteeIdInputType(required=False)
-
-
-
 
 
 @transaction.atomic
@@ -86,7 +85,12 @@ def update_or_create_claim_sampling_batch(data, user):
         claim_sampling_batch = ClaimSamplingBatch.objects.create(**claim_sampling_batch_data)
     claim_sampling_batch.save()
 
-    create_claim_sampling_batch_assignment(data=data, claim_sampling_batch=claim_sampling_batch)
+    claim_sampling_assignment = create_claim_sampling_batch_assignment(data=data, claim_sampling_batch=claim_sampling_batch)
+
+    assignment_as_json = [[x.claim_id.code, x.claim_batch_id.id] for x in claim_sampling_assignment]
+
+    from claim_sampling.services import create_review_task
+    create_review_task(user=user, claims=json.dumps(assignment_as_json), batch=claim_sampling_batch)
 
     return claim_sampling_batch
 
