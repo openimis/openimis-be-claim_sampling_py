@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 
 class ClaimSamplingBatchInputType(OpenIMISMutation.Input):
     percentage = graphene.Int(required=True)
-    claimAdminUuid = graphene.String(required=True)
 
     status = TinyInt(required=False)
     id = graphene.Int(required=False, read_only=True)
