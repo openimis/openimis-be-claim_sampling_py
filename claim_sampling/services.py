@@ -14,7 +14,7 @@ from core.services import BaseService
 from core.signals import register_service_signal
 from core.validation import BaseModelValidation
 from tasks_management.apps import TasksManagementConfig
-from tasks_management.models import Task
+from tasks_management.models import Task, TaskGroup
 from tasks_management.services import TaskService, _get_std_task_data_payload
 
 
@@ -25,8 +25,9 @@ class IndividualDataSourceValidation(BaseModelValidation):
 class ClaimSamplingService(BaseService):
     OBJECT_TYPE = ClaimSamplingBatch
 
+    @transaction.atomic
     @register_service_signal('claim_sampling_service.create')
-    def create(self, obj_data):
+    def create(self, obj_data, task_group: TaskGroup = None):
         """
         Creates a new sampling batch and assigns claims to it based on the specified sampling percentage.
 
@@ -40,7 +41,7 @@ class ClaimSamplingService(BaseService):
             obj_data (dict): A dictionary containing:
                 - 'percentage': The percentage of claims that should be selected for review (int).
                 - 'uuids': A QuerySet of claim UUIDs that should be considered for sampling (QuerySet).
-
+            task_group (TaskGroup): Task Group to which newly created task will be assigned.
         Usage:
             >>> claim_data = {'percentage': 20, 'uuids': Claim.objects.all()}
             >>> service = ClaimSamplingService(user)
@@ -49,6 +50,9 @@ class ClaimSamplingService(BaseService):
         """
         percentage = int(obj_data.pop('percentage'))
         claim_batch_ids = obj_data.pop('uuids')  # UUIDS QuerySet
+
+        if len(claim_batch_ids) == 0:
+            raise ValueError("Claim List cannot be empty")
 
         sampling_batch_data = super().create({
             'is_completed': False,
@@ -71,12 +75,13 @@ class ClaimSamplingService(BaseService):
              user_created=self.user,
              user_updated=self.user
             ))
-            claim.review_status = Claim.REVIEW_SELECTED
-            claim.save_history()
-            claim.save()
+            if claim.review_status in [Claim.REVIEW_NOT_SELECTED, Claim.REVIEW_BYPASSED]:
+                claim.review_status = Claim.REVIEW_SELECTED
+                claim.save_history()
+                claim.save()
 
         ClaimSamplingBatchAssignment.objects.bulk_create(batches)
-        self._create_sampling_task(sampling_batch_data, sampling_batch)
+        task = self._create_sampling_task(sampling_batch_data, sampling_batch, task_group)
         return sampling_batch
 
     @register_service_signal('claim_sampling_service.update')
@@ -161,6 +166,11 @@ class ClaimSamplingService(BaseService):
         selected_for_review = int((percentage/100.0) * total_elements)
         not_selected = total_elements - selected_for_review
 
+        # Ensure at least one claim is selected for review
+        if selected_for_review == 0 and not_selected > 0:
+            selected_for_review += 1
+            not_selected -= 1
+
         # Create the matching number of claims
         result_list = [ClaimSamplingBatchAssignment.Status.IDLE] * selected_for_review + \
                       [ClaimSamplingBatchAssignment.Status.SKIPPED] * not_selected
@@ -181,14 +191,15 @@ class ClaimSamplingService(BaseService):
         random.shuffle(result_list)
         return result_list
 
-    def _create_sampling_task(self, sampling_batch_data, sampling_batch):
+    def _create_sampling_task(self, sampling_batch_data, sampling_batch, task_group):
         return TaskService(self.user).create({
             'source': 'claim_sampling',
             'entity': sampling_batch,
-            'status': Task.Status.RECEIVED,
+            'status': Task.Status.ACCEPTED if task_group else Task.Status.RECEIVED,
             'executor_action_event': TasksManagementConfig.default_executor_event,
             'business_event': 'claim_sample_extrapolation',
-            'data': _get_std_task_data_payload({'uuid': sampling_batch_data['data']['uuid']})
+            'data': _get_std_task_data_payload(sampling_batch_data),
+            'task_group': task_group
         })
 
     def _update_not_reviewed(self, claims_list: List[Claim]):

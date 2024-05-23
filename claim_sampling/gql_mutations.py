@@ -8,6 +8,7 @@ import graphene
 
 from claim.gql_queries import ClaimGQLType
 from core.gql.gql_mutations import mutation_on_uuids_from_filter
+from tasks_management.models import TaskGroup
 from .apps import ClaimSamplingConfig
 from core.schema import TinyInt, OpenIMISMutation
 from django.contrib.auth.models import AnonymousUser
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 class ClaimSamplingBatchInputType(OpenIMISMutation.Input):
     percentage = graphene.Int(required=True)
+    t = graphene.Int(required=True)
 
     status = TinyInt(required=False)
     id = graphene.Int(required=False, read_only=True)
@@ -64,38 +66,15 @@ class ClaimSamplingBatchInputType(OpenIMISMutation.Input):
 
 
 @transaction.atomic
-def update_or_create_claim_sampling_batch(data, user):
+def update_or_create_claim_sampling_batch(data, user, task_group=None):
+
     service = ClaimSamplingService(user)
 
     if data.get('uuid', None) is not None:
         return service.update(data)
     else:
-        claim_sampling_batch = service.create(data)
+        claim_sampling_batch = service.create(data, task_group)
         return claim_sampling_batch
-
-
-def create_claim_sampling_batch_assignment(data, claim_sampling_batch):
-    from claim_sampling.services import get_claims_from_data_helper
-    percentage = data.pop('percentage')
-    claim_batch_ids = get_claims_from_data_helper(data)#[claim.id for claim in get_claims_from_data_helper(data)]
-    data['claim_batch_id'] = claim_sampling_batch.id
-    data['claim_id'] = claim_batch_ids
-    status_options = [ClaimSamplingBatchAssignment.Status.IDLE, ClaimSamplingBatchAssignment.Status.SKIPPED]
-    status_list = random.choices(status_options, cum_weights=[percentage, 100], k=len(claim_batch_ids))
-
-    # claim_sampling_batch_assignments = [ClaimSamplingBatchAssignment(claim_batch_id=claim_sampling_batch.id,
-    #                                                                  claim_id=status_list[])]
-    claim_sampling_batch_assignments = []
-
-    for idx, claim_id in enumerate(claim_batch_ids):
-        claim_sampling_batch_assignments.append(ClaimSamplingBatchAssignment(claim_batch_id=claim_sampling_batch,
-                                                                             claim_id=claim_id,
-                                                                             status=status_list[idx]))
-
-    assignments = ClaimSamplingBatchAssignment.objects.bulk_create(claim_sampling_batch_assignments)
-
-    # claim_sampling_batch_assignment.save()
-    return assignments #claim_sampling_batch_assignment
 
 
 class CreateClaimSamplingBatchMutation(OpenIMISMutation):
@@ -113,7 +92,7 @@ class CreateClaimSamplingBatchMutation(OpenIMISMutation):
     class Input(OpenIMISMutation.Input):
         filters = graphene.String()
         percentage = graphene.Int(required=True)
-        claimAdminUuid = graphene.String(required=True)
+        taskGroupUuid = graphene.String(required=False)
 
     @classmethod
     @mutation_on_uuids_from_filter(Claim, ClaimGQLType, 'filters', __filter_handlers)
@@ -130,7 +109,10 @@ class CreateClaimSamplingBatchMutation(OpenIMISMutation):
             # data['audit_user_id'] = user.id_for_audit
             from core.utils import TimeUtils
             # data['validity_from'] = TimeUtils.now()
-            claim_sampling_batch = update_or_create_claim_sampling_batch(data, user)
+            group_id = data.get('taskGroupUuid')
+
+            task_group = TaskGroup.objects.get(id=group_id) if group_id else None
+            claim_sampling_batch = update_or_create_claim_sampling_batch(data, user, task_group)
             return None
         except Exception as exc:
             from django.conf import settings

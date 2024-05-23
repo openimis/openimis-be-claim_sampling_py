@@ -21,23 +21,6 @@ from graphene_django.utils.testing import GraphQLTestCase
 from claim_sampling import schema as claim_schema
 from graphene.test import Client
 
-"""
-mutation {
-  createClaimSamplingBatch(
-    input: {
-      clientMutationId: "fdcc211f-7225-4f0e-8a66-11223344667d"
-      clientMutationLabel: "Create Claim Sampling Batch" 
-      percentage: 20
-      claimAdminUuid: "c60bacae-2aac-4bbf-bdad-7258ebb75f1f"
-      filters: "{\"status\":4}"        
-    }      
-  ) {
-    clientMutationId
-    internalId
-  }    
-}
-"""
-
 
 class ClaimSubmitServiceTestCase(GraphQLTestCase):
     GRAPHQL_URL = f'/{settings.SITE_ROOT()}graphql'
@@ -172,7 +155,6 @@ mutation {
       clientMutationId: "fdcc211f-7225-4f0e-8a66-11223344667d"
       clientMutationLabel: "Create Claim Sampling Batch" 
       percentage: 20
-      claimAdminUuid: "c60bacae-2aac-4bbf-bdad-7258ebb75f1f"
       filters: "{\\"status\\":4, \\"dateFrom\\": \\"2024-01-13\\"}"        
     }      
   ) {

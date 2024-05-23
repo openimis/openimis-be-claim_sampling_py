@@ -74,12 +74,11 @@ class Query(graphene.ObjectType):
         if claim_assignment_status:
             relevant_claims = relevant_claims.filter(status=claim_assignment_status)
 
-        # Only checked claims are allowed
+        # All claims are displayed but
         query = Claim.objects.filter(
             id__in=relevant_claims.values_list('claim_id', flat=True),
-            status=Claim.STATUS_CHECKED,
             validity_to__isnull=True  # Ensuring that only valid (non-expired) claims are returned
-        )
+        ).order_by('status')
 
         return query
 
