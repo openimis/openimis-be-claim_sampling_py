@@ -7,6 +7,7 @@ from claim.models import Claim
 from enum import Enum
 from django.db.models import OuterRef, Subquery, Avg, Q
 from django.db import transaction
+from django.utils.translation import gettext as _
 
 from claim.services import set_claims_status, update_claims_dedrems
 from claim_sampling.models import ClaimSamplingBatch, ClaimSamplingBatchAssignment
@@ -52,7 +53,9 @@ class ClaimSamplingService(BaseService):
         claim_batch_ids = obj_data.pop('uuids')  # UUIDS QuerySet
 
         if len(claim_batch_ids) == 0:
-            raise ValueError("Claim List cannot be empty")
+            raise ValueError(_("Claim List cannot be empty"))
+        if percentage < 1 or percentage > 100:
+            raise ValueError(_("Percentage not in range (0, 100)"))
 
         sampling_batch_data = super().create({
             'is_completed': False,
