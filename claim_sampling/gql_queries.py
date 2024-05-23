@@ -70,3 +70,10 @@ class ClaimSamplingBatchAssignmentGQLType(DjangoObjectType):
             "attachments_count__value": ["exact", "lt", "lte", "gt", "gte"],
         }
         connection_class = ExtendedConnection
+
+
+class ClaimSamplingSummaryGQLType(graphene.ObjectType):
+    deductible_percentage = graphene.Float(description="Percentage of claims rejected during review - deductibles.")
+    reviewed_percentage = graphene.Float(description="Percentage of reviewed claims in batch.")
+    total_claims_in_batch = graphene.Int(description="Total number of claims selected for review in sampling batch")
+

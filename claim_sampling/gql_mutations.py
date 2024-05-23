@@ -6,6 +6,8 @@ from typing import Callable, Dict
 import random
 import graphene
 
+from claim.gql_queries import ClaimGQLType
+from core.gql.gql_mutations import mutation_on_uuids_from_filter
 from .apps import ClaimSamplingConfig
 from core.schema import TinyInt, OpenIMISMutation
 from django.contrib.auth.models import AnonymousUser
@@ -13,11 +15,12 @@ from django.core.exceptions import ValidationError, PermissionDenied
 from django.utils.translation import gettext as _
 
 from claim.gql_mutations import ClaimCodeInputType, ClaimGuaranteeIdInputType, FeedbackInputType
-from claim.models import ClaimAdmin
+from claim.models import ClaimAdmin, Claim
 
 from django.db import transaction
 
 from .models import ClaimSamplingBatch, ClaimSamplingBatchAssignment
+from .services import ClaimSamplingService
 
 logger = logging.getLogger(__name__)
 
@@ -61,34 +64,15 @@ class ClaimSamplingBatchInputType(OpenIMISMutation.Input):
     # guarantee_id = ClaimGuaranteeIdInputType(required=False)
 
 
-
-
-
 @transaction.atomic
 def update_or_create_claim_sampling_batch(data, user):
-    claim_sampling_batch_uuid = data.pop("uuid", None)
+    service = ClaimSamplingService(user)
 
-    claim_sampling_batch_data = {'assigned_to': ClaimAdmin.objects.get(uuid=data.get("claimAdminUuid")),
-                                 'created_by': ClaimAdmin.objects.get(uuid=data.pop("claimAdminUuid")),#user.id
-                                 'is_completed': False,
-                                 'is_applied': False,
-                                 'computed_value':  {},
-                                 'assigned_value':  {},
-                                 }
-
-    if claim_sampling_batch_uuid is not None:
-        claim_sampling_batch = ClaimSamplingBatch.objects.get(uuid=claim_sampling_batch_uuid)
-        claim_sampling_batch.save_history()
-        # reset the non required fields
-        # (each update is 'complete', necessary to be able to set 'null')
-        [setattr(claim_sampling_batch, key, claim_sampling_batch_data[key]) for key in claim_sampling_batch_data]
+    if data.get('uuid', None) is not None:
+        return service.update(data)
     else:
-        claim_sampling_batch = ClaimSamplingBatch.objects.create(**claim_sampling_batch_data)
-    claim_sampling_batch.save()
-
-    create_claim_sampling_batch_assignment(data=data, claim_sampling_batch=claim_sampling_batch)
-
-    return claim_sampling_batch
+        claim_sampling_batch = service.create(data)
+        return claim_sampling_batch
 
 
 def create_claim_sampling_batch_assignment(data, claim_sampling_batch):
@@ -119,13 +103,21 @@ class CreateClaimSamplingBatchMutation(OpenIMISMutation):
     """
     Create a new claim sampling batch.
     """
+    __filter_handlers = {
+        'services': 'services__service__code__in',
+        'items': 'items__item__code__in'
+    }
+
     _mutation_module = "claim_sampling"
     _mutation_class = "CreateClaimSamplingBatchMutation"
 
-    class Input(ClaimSamplingBatchInputType):
-        pass
+    class Input(OpenIMISMutation.Input):
+        filters = graphene.String()
+        percentage = graphene.Int(required=True)
+        claimAdminUuid = graphene.String(required=True)
 
     @classmethod
+    @mutation_on_uuids_from_filter(Claim, ClaimGQLType, 'filters', __filter_handlers)
     def async_mutate(cls, user, **data):
         try:
             if type(user) is AnonymousUser or not user.id:
@@ -142,6 +134,11 @@ class CreateClaimSamplingBatchMutation(OpenIMISMutation):
             claim_sampling_batch = update_or_create_claim_sampling_batch(data, user)
             return None
         except Exception as exc:
+            from django.conf import settings
+            if settings.DEBUG:
+                import traceback
+                logging.debug("Error in claim sampling mutation: ", exc)
+                traceback.print_exc()
             return [{
                 'message': _("claim.mutation.failed_to_create_claim_sampling_batch") % {'code': data['code']},
                 'detail': str(exc)}]
