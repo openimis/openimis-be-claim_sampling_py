@@ -6,6 +6,9 @@ from typing import Callable, Dict
 import random
 import graphene
 
+from claim.gql_queries import ClaimGQLType
+from core.gql.gql_mutations import mutation_on_uuids_from_filter
+from tasks_management.models import TaskGroup
 from .apps import ClaimSamplingConfig
 from core.schema import TinyInt, OpenIMISMutation
 from django.contrib.auth.models import AnonymousUser
@@ -13,18 +16,19 @@ from django.core.exceptions import ValidationError, PermissionDenied
 from django.utils.translation import gettext as _
 
 from claim.gql_mutations import ClaimCodeInputType, ClaimGuaranteeIdInputType, FeedbackInputType
-from claim.models import ClaimAdmin
+from claim.models import ClaimAdmin, Claim
 
 from django.db import transaction
 
 from .models import ClaimSamplingBatch, ClaimSamplingBatchAssignment
+from .services import ClaimSamplingService
 
 logger = logging.getLogger(__name__)
 
 
 class ClaimSamplingBatchInputType(OpenIMISMutation.Input):
     percentage = graphene.Int(required=True)
-    claimAdminUuid = graphene.String(required=True)
+    t = graphene.Int(required=True)
 
     status = TinyInt(required=False)
     id = graphene.Int(required=False, read_only=True)
@@ -61,71 +65,37 @@ class ClaimSamplingBatchInputType(OpenIMISMutation.Input):
     # guarantee_id = ClaimGuaranteeIdInputType(required=False)
 
 
-
-
-
 @transaction.atomic
-def update_or_create_claim_sampling_batch(data, user):
-    claim_sampling_batch_uuid = data.pop("uuid", None)
+def update_or_create_claim_sampling_batch(data, user, task_group=None):
 
-    claim_sampling_batch_data = {'assigned_to': ClaimAdmin.objects.get(uuid=data.get("claimAdminUuid")),
-                                 'created_by': ClaimAdmin.objects.get(uuid=data.pop("claimAdminUuid")),#user.id
-                                 'is_completed': False,
-                                 'is_applied': False,
-                                 'computed_value':  {},
-                                 'assigned_value':  {},
-                                 }
+    service = ClaimSamplingService(user)
 
-    if claim_sampling_batch_uuid is not None:
-        claim_sampling_batch = ClaimSamplingBatch.objects.get(uuid=claim_sampling_batch_uuid)
-        claim_sampling_batch.save_history()
-        # reset the non required fields
-        # (each update is 'complete', necessary to be able to set 'null')
-        [setattr(claim_sampling_batch, key, claim_sampling_batch_data[key]) for key in claim_sampling_batch_data]
+    if data.get('uuid', None) is not None:
+        return service.update(data)
     else:
-        claim_sampling_batch = ClaimSamplingBatch.objects.create(**claim_sampling_batch_data)
-    claim_sampling_batch.save()
-
-    create_claim_sampling_batch_assignment(data=data, claim_sampling_batch=claim_sampling_batch)
-
-    return claim_sampling_batch
-
-
-def create_claim_sampling_batch_assignment(data, claim_sampling_batch):
-    from claim_sampling.services import get_claims_from_data_helper
-    percentage = data.pop('percentage')
-    claim_batch_ids = get_claims_from_data_helper(data)#[claim.id for claim in get_claims_from_data_helper(data)]
-    data['claim_batch_id'] = claim_sampling_batch.id
-    data['claim_id'] = claim_batch_ids
-    status_options = [ClaimSamplingBatchAssignment.Status.IDLE, ClaimSamplingBatchAssignment.Status.SKIPPED]
-    status_list = random.choices(status_options, cum_weights=[percentage, 100], k=len(claim_batch_ids))
-
-    # claim_sampling_batch_assignments = [ClaimSamplingBatchAssignment(claim_batch_id=claim_sampling_batch.id,
-    #                                                                  claim_id=status_list[])]
-    claim_sampling_batch_assignments = []
-
-    for idx, claim_id in enumerate(claim_batch_ids):
-        claim_sampling_batch_assignments.append(ClaimSamplingBatchAssignment(claim_batch_id=claim_sampling_batch,
-                                                                             claim_id=claim_id,
-                                                                             status=status_list[idx]))
-
-    assignments = ClaimSamplingBatchAssignment.objects.bulk_create(claim_sampling_batch_assignments)
-
-    # claim_sampling_batch_assignment.save()
-    return assignments #claim_sampling_batch_assignment
+        claim_sampling_batch = service.create(data, task_group)
+        return claim_sampling_batch
 
 
 class CreateClaimSamplingBatchMutation(OpenIMISMutation):
     """
     Create a new claim sampling batch.
     """
+    __filter_handlers = {
+        'services': 'services__service__code__in',
+        'items': 'items__item__code__in'
+    }
+
     _mutation_module = "claim_sampling"
     _mutation_class = "CreateClaimSamplingBatchMutation"
 
-    class Input(ClaimSamplingBatchInputType):
-        pass
+    class Input(OpenIMISMutation.Input):
+        filters = graphene.String()
+        percentage = graphene.Int(required=True)
+        taskGroupUuid = graphene.String(required=False)
 
     @classmethod
+    @mutation_on_uuids_from_filter(Claim, ClaimGQLType, 'filters', __filter_handlers)
     def async_mutate(cls, user, **data):
         try:
             if type(user) is AnonymousUser or not user.id:
@@ -139,9 +109,17 @@ class CreateClaimSamplingBatchMutation(OpenIMISMutation):
             # data['audit_user_id'] = user.id_for_audit
             from core.utils import TimeUtils
             # data['validity_from'] = TimeUtils.now()
-            claim_sampling_batch = update_or_create_claim_sampling_batch(data, user)
+            group_id = data.get('taskGroupUuid')
+
+            task_group = TaskGroup.objects.get(id=group_id) if group_id else None
+            claim_sampling_batch = update_or_create_claim_sampling_batch(data, user, task_group)
             return None
         except Exception as exc:
+            from django.conf import settings
+            if settings.DEBUG:
+                import traceback
+                logging.debug("Error in claim sampling mutation: ", exc)
+                traceback.print_exc()
             return [{
                 'message': _("claim.mutation.failed_to_create_claim_sampling_batch") % {'code': data['code']},
                 'detail': str(exc)}]
