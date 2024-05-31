@@ -154,7 +154,7 @@ mutation {
     input: {
       clientMutationId: "fdcc211f-7225-4f0e-8a66-11223344667d"
       clientMutationLabel: "Create Claim Sampling Batch" 
-      percentage: 20
+      percentage: 30
       filters: "{\\"status\\":4, \\"dateFrom\\": \\"2024-01-13\\"}"        
     }      
   ) {
@@ -173,13 +173,14 @@ mutation {
         skip = list(attachments.filter(status=ClaimSamplingBatchAssignment.Status.SKIPPED))
 
         # Creation
-        self.assertEqual(len(idle), 2)
-        self.assertEqual(len(skip), 8)
+        self.assertEqual(len(idle), 3)
+        self.assertEqual(len(skip), 7)
         self.assertEqual(idle[0].claim.review_status, Claim.REVIEW_SELECTED)
         self.assertEqual(idle[1].claim.review_status, Claim.REVIEW_SELECTED)
+        self.assertEqual(idle[2].claim.review_status, Claim.REVIEW_SELECTED)
 
         # Summary
-        claim_1, claim_2 = idle[0].claim, idle[1].claim
+        claim_1, claim_2, claim_3 = idle[0].claim, idle[1].claim, idle[2].claim
         claim_1.review_status = Claim.REVIEW_DELIVERED
         claim_1.status = Claim.STATUS_PROCESSED
         claim_1.save()
@@ -188,11 +189,15 @@ mutation {
         claim_2.status = Claim.STATUS_REJECTED
         claim_2.save()
 
+        claim_3.review_status = Claim.REVIEW_DELIVERED
+        claim_3.status = Claim.STATUS_REJECTED
+        claim_3.save()
+
         service = ClaimSamplingService(self.admin_user)
         rejected_from_review, reviewed_delivered, total = service.prepare_sampling_summary(claim_sampling.id)
-        self.assertEqual(rejected_from_review.count(), 1)
-        self.assertEqual(reviewed_delivered.count(), 2)
-        self.assertEqual(total, 2)
+        self.assertEqual(rejected_from_review.count(), 2)
+        self.assertEqual(reviewed_delivered.count(), 3)
+        self.assertEqual(total, 3)
 
         # Extrapolation
         service.extrapolate_results(claim_sampling.id)
@@ -201,7 +206,7 @@ mutation {
         skip = [x.claim for x in attachments.filter(status=ClaimSamplingBatchAssignment.Status.SKIPPED)]
         accepted = [x for x in skip if x.status in [Claim.STATUS_PROCESSED, Claim.STATUS_VALUATED]]
         rejected = [x for x in skip if x.status in [Claim.STATUS_REJECTED]]
-        self.assertEqual(len(accepted), 4)
+        self.assertEqual(len(accepted), 3)
         self.assertEqual(len(rejected), 4)
 
     def _get_test_dict(self, code=None):
