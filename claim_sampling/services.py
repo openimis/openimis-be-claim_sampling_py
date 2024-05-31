@@ -9,7 +9,7 @@ from django.db.models import OuterRef, Subquery, Avg, Q
 from django.db import transaction
 from django.utils.translation import gettext as _
 
-from claim.services import set_claims_status, update_claims_dedrems
+from claim.services import set_claims_status, update_claims_dedrems, validate_and_process_dedrem_claim
 from claim_sampling.models import ClaimSamplingBatch, ClaimSamplingBatchAssignment
 from core.services import BaseService
 from core.signals import register_service_signal
@@ -70,15 +70,17 @@ class ClaimSamplingService(BaseService):
         batches = []
         for next_claim in claim_batch_ids:
             claim = Claim.objects.get(uuid=next_claim)
+            should_be_reviewed = is_selected_for_review.pop()
             batches.append(ClaimSamplingBatchAssignment(
              uuid=uuid.uuid4(),
              claim=claim,
              claim_batch=sampling_batch,
-             status=is_selected_for_review.pop(),
+             status=should_be_reviewed,
              user_created=self.user,
              user_updated=self.user
             ))
-            if claim.review_status in [Claim.REVIEW_NOT_SELECTED, Claim.REVIEW_BYPASSED]:
+            if claim.review_status in [Claim.REVIEW_IDLE, Claim.REVIEW_NOT_SELECTED, Claim.REVIEW_BYPASSED] \
+                    and should_be_reviewed == ClaimSamplingBatchAssignment.Status.IDLE:
                 claim.review_status = Claim.REVIEW_SELECTED
                 claim.save_history()
                 claim.save()
@@ -129,16 +131,20 @@ class ClaimSamplingService(BaseService):
 
         for approved, assignment in zip(split, claims_awaiting_validation):
             if approved == Claim.STATUS_VALUATED:
-                result['approved'].append(assignment.claim.uuid)
+                result['approved'].append(assignment.claim)
             else:
                 result['rejected'].append(assignment.claim.uuid)
 
         set_claims_status(result['rejected'], 'status', Claim.STATUS_REJECTED)
-        errors = update_claims_dedrems(result['approved'], self.user)
-        errors += update_claims_dedrems(
-            sample_claim_assignments.filter(status=Claim.STATUS_CHECKED),
-            self.user
-        )
+        errors = []
+        for claim in result['approved']:
+            errors += validate_and_process_dedrem_claim(claim, self.user, True)
+        for claim in sample_claim_assignments.filter(status=Claim.STATUS_CHECKED):
+            errors += validate_and_process_dedrem_claim(
+                claim,
+                self.user,
+                True
+            )
         return errors
 
     def prepare_sampling_summary(self, claim_sampling_id):
@@ -183,8 +189,8 @@ class ClaimSamplingService(BaseService):
         return result_list
 
     def __choose_random_claims_for_deductible(self, total_elements: int, percentage: int):
-        valid = int((percentage/100.0) * total_elements)
-        rejected = total_elements - valid
+        rejected = int((percentage/100.0) * total_elements)
+        valid = total_elements - rejected
 
         # Create the matching number of claims
         result_list = [Claim.STATUS_VALUATED] * valid + \
