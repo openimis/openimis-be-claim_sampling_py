@@ -9,6 +9,9 @@ class ClaimSamplingBatch(HistoryModel):
     computed_value = models.JSONField(db_column="ComputedValue", blank=True, null=True)
     assigned_value = models.JSONField(db_column="AssignedValue", blank=True, null=True)
 
+    def __str__(self):
+        return f"Claim Sampling - {self.date_created}"
+
 
 class ClaimSamplingBatchAssignment(HistoryModel):
     class Status(models.TextChoices):

@@ -17,7 +17,7 @@ def _resolve_task_any(_task: Task, _user: User):
     claim_sampling_id = _task.data['data']['uuid']
     claim_sampling_service = ClaimSamplingService(user=_user)
 
-    rejected_from_review, reviewed_delivered, total = claim_sampling_service\
+    rejected_from_review = claim_sampling_service\
         .extrapolate_results(claim_sampling_id)
 
 
