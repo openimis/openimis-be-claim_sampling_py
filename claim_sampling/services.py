@@ -54,6 +54,12 @@ class ClaimSamplingService(BaseService):
 
         if len(claim_batch_ids) == 0:
             raise ValueError(_("Claim List cannot be empty"))
+
+        claim_batch_ids = self.__filter_already_assigned(claim_batch_ids=claim_batch_ids)
+
+        if len(claim_batch_ids) == 0:
+            raise ValueError(_("All claims already assigned"))
+
         if percentage < 1 or percentage > 100:
             raise ValueError(_("Percentage not in range (0, 100)"))
 
@@ -79,7 +85,7 @@ class ClaimSamplingService(BaseService):
              user_created=self.user,
              user_updated=self.user
             ))
-            if claim.review_status in [Claim.REVIEW_IDLE, Claim.REVIEW_NOT_SELECTED, Claim.REVIEW_BYPASSED] \
+            if claim.review_status in [Claim.REVIEW_IDLE, Claim.REVIEW_NOT_SELECTED] \
                     and should_be_reviewed == ClaimSamplingBatchAssignment.Status.IDLE:
                 claim.review_status = Claim.REVIEW_SELECTED
                 claim.save_history()
@@ -96,6 +102,10 @@ class ClaimSamplingService(BaseService):
     @register_service_signal('claim_sampling_service.delete')
     def delete(self, obj_data):
         return super().delete(obj_data)
+
+    def __filter_already_assigned(self, claim_batch_ids):
+        filtered_claim_batch_ids = claim_batch_ids.exclude(id__in=ClaimSamplingBatchAssignment.objects.filter(claim__uuid__in=claim_batch_ids).values("claim"))
+        return filtered_claim_batch_ids
 
     @transaction.atomic
     def extrapolate_results(self, claim_sampling_id):
