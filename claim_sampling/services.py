@@ -54,6 +54,12 @@ class ClaimSamplingService(BaseService):
 
         if len(claim_batch_ids) == 0:
             raise ValueError(_("Claim List cannot be empty"))
+
+        claim_batch_ids = self.__filter_already_assigned(claim_batch_ids=claim_batch_ids)
+
+        if len(claim_batch_ids) == 0:
+            raise ValueError(_("All claims already assigned"))
+
         if percentage < 1 or percentage > 100:
             raise ValueError(_("Percentage not in range (0, 100)"))
 
@@ -79,7 +85,7 @@ class ClaimSamplingService(BaseService):
              user_created=self.user,
              user_updated=self.user
             ))
-            if claim.review_status in [Claim.REVIEW_IDLE, Claim.REVIEW_NOT_SELECTED, Claim.REVIEW_BYPASSED] \
+            if claim.review_status in [Claim.REVIEW_IDLE, Claim.REVIEW_NOT_SELECTED] \
                     and should_be_reviewed == ClaimSamplingBatchAssignment.Status.IDLE:
                 claim.review_status = Claim.REVIEW_SELECTED
                 claim.save_history()
@@ -96,6 +102,10 @@ class ClaimSamplingService(BaseService):
     @register_service_signal('claim_sampling_service.delete')
     def delete(self, obj_data):
         return super().delete(obj_data)
+
+    def __filter_already_assigned(self, claim_batch_ids):
+        filtered_claim_batch_ids = claim_batch_ids.exclude(id__in=ClaimSamplingBatchAssignment.objects.filter(claim__uuid__in=claim_batch_ids).values("claim"))
+        return filtered_claim_batch_ids
 
     @transaction.atomic
     def extrapolate_results(self, claim_sampling_id):
@@ -120,22 +130,21 @@ class ClaimSamplingService(BaseService):
 
         deductible = round(rejected_from_review.count() / reviewed_delivered.count(), 2) * 100
         # SHOULD WE RUN ENGINE BEFORE THIS?
-        split = self.__choose_random_claims_for_deductible(
-            claims_awaiting_validation.count(), deductible
-        )
 
         result = {
             'approved': [],
             'rejected': []
         }
 
-        for approved, assignment in zip(split, claims_awaiting_validation):
+        for approved, assignment in claims_awaiting_validation:
             if approved == Claim.STATUS_VALUATED:
                 result['approved'].append(assignment.claim)
             else:
                 result['rejected'].append(assignment.claim.uuid)
 
         set_claims_status(result['rejected'], 'status', Claim.STATUS_REJECTED)
+        for claim in approved:
+            self.apply_claim_item_service_deduction(claim=claim, deduction_rate=deductible)
         errors = []
         for claim in result['approved']:
             errors += validate_and_process_dedrem_claim(claim, self.user, True)
@@ -153,6 +162,23 @@ class ClaimSamplingService(BaseService):
         reviewed_delivered = relevant_claims.filter(review_status=Claim.REVIEW_DELIVERED)
         rejected_from_review = reviewed_delivered.filter(status=Claim.STATUS_REJECTED)
         return rejected_from_review, reviewed_delivered, total
+
+    def apply_claim_item_service_deduction(self, claim, deduction_rate):
+        claim_items = claim.items.all()
+
+        for item in claim_items:
+            new_claim_item = item
+            if new_claim_item.price_approved:
+                new_claim_item.price_approved *= (100-deduction_rate)/100
+                new_claim_item.save()
+
+        claim_services = claim.services.all()
+
+        for service in claim_services:
+            new_claim_service = service
+            if new_claim_service.price_approved:
+                new_claim_service.price_approved *= (100-deduction_rate)/100
+                new_claim_service.save()
 
     def _get_sampling_claims(self, claim_sampling_id, include_skip=False):
         assigned_claims = ClaimSamplingBatchAssignment.objects.filter(claim_batch_id=claim_sampling_id)
@@ -183,18 +209,6 @@ class ClaimSamplingService(BaseService):
         # Create the matching number of claims
         result_list = [ClaimSamplingBatchAssignment.Status.IDLE] * selected_for_review + \
                       [ClaimSamplingBatchAssignment.Status.SKIPPED] * not_selected
-
-        # Shuffle the list to randomize the order
-        random.shuffle(result_list)
-        return result_list
-
-    def __choose_random_claims_for_deductible(self, total_elements: int, percentage: int):
-        rejected = int((percentage/100.0) * total_elements)
-        valid = total_elements - rejected
-
-        # Create the matching number of claims
-        result_list = [Claim.STATUS_VALUATED] * valid + \
-                      [Claim.STATUS_REJECTED] * rejected
 
         # Shuffle the list to randomize the order
         random.shuffle(result_list)
