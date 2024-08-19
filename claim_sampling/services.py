@@ -3,17 +3,23 @@ import uuid
 from typing import List
 
 from claim.apps import ClaimConfig
-from claim.models import Claim
+from claim.models import Claim, ClaimItem, ClaimService
 from enum import Enum
-from django.db.models import OuterRef, Subquery, Avg, Q
+from django.db.models import OuterRef, Subquery, Avg, Q, Sum, F, ExpressionWrapper, DecimalField,  Subquery, OuterRef, Case, Value, When
+from django.db.models.functions import Coalesce
 from django.db import transaction
 from django.utils.translation import gettext as _
 
 from claim.services import set_claims_status, update_claims_dedrems, validate_and_process_dedrem_claim
-from claim_sampling.models import ClaimSamplingBatch, ClaimSamplingBatchAssignment
+from claim_sampling.models import (
+    ClaimSamplingBatch,
+    ClaimSamplingBatchAssignment,
+    ClaimSamplingBatchAssignmentStatus
+)
 from core.services import BaseService
 from core.signals import register_service_signal
 from core.validation import BaseModelValidation
+from core import filter_validity
 from tasks_management.apps import TasksManagementConfig
 from tasks_management.models import Task, TaskGroup
 from tasks_management.services import TaskService, _get_std_task_data_payload
@@ -86,7 +92,7 @@ class ClaimSamplingService(BaseService):
              user_updated=self.user
             ))
             if claim.review_status in [Claim.REVIEW_IDLE, Claim.REVIEW_NOT_SELECTED] \
-                    and should_be_reviewed == ClaimSamplingBatchAssignment.Status.IDLE:
+                    and should_be_reviewed == ClaimSamplingBatchAssignmentStatus.IDLE:
                 claim.review_status = Claim.REVIEW_SELECTED
                 claim.save_history()
                 claim.save()
@@ -110,50 +116,97 @@ class ClaimSamplingService(BaseService):
     @transaction.atomic
     def extrapolate_results(self, claim_sampling_id):
         claim_sampling = ClaimSamplingBatch.objects.get(id=claim_sampling_id)
-        sample_claim_assignments = self._get_sampling_claims(claim_sampling_id, False)
 
-        selected_for_review_not_delivered = list(
-            sample_claim_assignments
-            .filter(review_status=Claim.REVIEW_SELECTED)
-        )
-
-        claims_awaiting_validation = ClaimSamplingBatchAssignment\
-            .objects.filter(claim_batch_id=claim_sampling_id)\
-            .filter(status=ClaimSamplingBatchAssignment.Status.SKIPPED)\
-            .select_related('claim')
-
-        reviewed_delivered = sample_claim_assignments.filter(review_status=Claim.REVIEW_DELIVERED)
-        rejected_from_review = reviewed_delivered.filter(status=Claim.STATUS_REJECTED)
-
-        # Change review status to bypass
-        self._update_not_reviewed([c.claim for c in selected_for_review_not_delivered])
-
-        deductible = round(rejected_from_review.count() / reviewed_delivered.count(), 2) * 100
-        # SHOULD WE RUN ENGINE BEFORE THIS?
-
-        result = {
-            'approved': [],
-            'rejected': []
-        }
-
-        for approved, assignment in claims_awaiting_validation:
-            if approved == Claim.STATUS_VALUATED:
-                result['approved'].append(assignment.claim)
-            else:
-                result['rejected'].append(assignment.claim.uuid)
-
-        set_claims_status(result['rejected'], 'status', Claim.STATUS_REJECTED)
-        for claim in approved:
-            self.apply_claim_item_service_deduction(claim=claim, deduction_rate=deductible)
-        errors = []
-        for claim in result['approved']:
-            errors += validate_and_process_dedrem_claim(claim, self.user, True)
-        for claim in sample_claim_assignments.filter(status=Claim.STATUS_CHECKED):
-            errors += validate_and_process_dedrem_claim(
-                claim,
-                self.user,
-                True
+        qs = Claim.objects.filter(assignments__claim_batch=claim_sampling, *filter_validity())
+        # Subquery for total_itm_adjusted
+        total_itm_adjusted_subquery = Claim.objects.filter(id=OuterRef('id')).annotate(
+            total_itm_adjusted=Sum(
+                F("items__qty_provided") * Coalesce("items__price_adjusted", "items__price_asked")
             )
+        ).values('total_itm_adjusted')[:1]
+
+        # Subquery for total_srv_adjusted
+        total_srv_adjusted_subquery = Claim.objects.filter(id=OuterRef('id')).annotate(
+            total_srv_adjusted=Sum(
+                F("services__qty_provided") * Coalesce("services__price_adjusted", "services__price_asked")
+            )
+        ).values('total_srv_adjusted')[:1]
+
+        # Subquery for total_itm_approved
+        total_itm_approved_subquery = Claim.objects.filter(id=OuterRef('id')).annotate(
+            total_itm_approved=Sum(
+                Case(
+                    When(status=Claim.STATUS_REJECTED, then=Value(0)),
+                    default=Coalesce("items__qty_approved", "items__qty_provided", 0) * 
+                        Coalesce("items__price_approved", "services__price_adjusted", "items__price_asked"),
+                    output_field=DecimalField()
+                )
+            )
+        ).values('total_itm_approved')[:1]
+
+        # Subquery for total_srv_approved
+        total_srv_approved_subquery = Claim.objects.filter(id=OuterRef('id')).annotate(
+            total_srv_approved=Sum(
+                Case(
+                    When(status=Claim.STATUS_REJECTED, then=Value(0)),
+                    default=Coalesce("services__qty_approved", "services__qty_provided", 0) *
+                    Coalesce("services__price_approved", "services__price_adjusted", "services__price_asked"),
+                    output_field=DecimalField()
+                )
+            )
+        ).values('total_srv_approved')[:1]
+
+        deductible = qs.filter(review_status=Claim.REVIEW_DELIVERED)\
+            .filter(Q(services__rejection_reason=-1) | Q(services__rejection_reason__isnull=True))\
+            .annotate(total_srv_adjusted=(total_srv_adjusted_subquery))\
+            .annotate(total_itm_adjusted=(total_itm_adjusted_subquery))\
+            .annotate(total_srv_approved=(total_srv_approved_subquery))\
+            .annotate(total_itm_approved=(total_itm_approved_subquery))\
+            .aggregate(value=ExpressionWrapper(
+                (Sum("total_srv_approved") + Sum("total_itm_approved")) /
+                ( Sum("total_srv_adjusted") + Sum("total_itm_adjusted")),
+                output_field=DecimalField()
+            ))["value"]
+                   
+        
+        qs_extrapolated = qs.filter(assignments__status=ClaimSamplingBatchAssignmentStatus.SKIPPED, review_status=Claim.REVIEW_SELECTED)
+        
+        # Subquery for total_itm_adjusted
+        total_itm_adjusted_subquery = Claim.objects.filter(id=OuterRef('id')).annotate(
+            total_itm_adjusted=Sum(
+                F("items__qty_provided") * Coalesce("items__price_adjusted", "items__price_asked")
+            )
+        ).values('total_itm_adjusted')[:1]
+
+        # Subquery for total_srv_adjusted
+        total_srv_adjusted_subquery = Claim.objects.filter(id=OuterRef('id')).annotate(
+            total_srv_adjusted=Sum(
+                F("services__qty_provided") * Coalesce("services__price_adjusted", "services__price_asked")
+            )
+        ).values('total_srv_adjusted')[:1]
+
+        # Filter claims for extrapolation
+        qs_extrapolated = qs.filter(assignments__status=ClaimSamplingBatchAssignmentStatus.SKIPPED, review_status=Claim.REVIEW_IDLE)
+
+        # Update the claims using subqueries
+        qs_extrapolated.update(
+            review_status=Claim.REVIEW_BYPASSED,
+            approved=ExpressionWrapper(
+                deductible * (
+                    Coalesce(Subquery(total_itm_adjusted_subquery), 0) +
+                    Coalesce(Subquery(total_srv_adjusted_subquery), 0)
+                ),
+                output_field=DecimalField()
+            )
+        )
+        # update service and item
+        ClaimItem.objects.filter(claim__in=qs_extrapolated).update(price_approved=deductible * F("price_adjusted"))
+        ClaimService.objects.filter(claim__in=qs_extrapolated).update(price_approved=deductible * F("price_adjusted"))
+
+        errors = []
+        for claim in qs:
+            errors += validate_and_process_dedrem_claim(claim, self.user, True)
+
         return errors
 
     def prepare_sampling_summary(self, claim_sampling_id):
@@ -183,11 +236,11 @@ class ClaimSamplingService(BaseService):
     def _get_sampling_claims(self, claim_sampling_id, include_skip=False):
         assigned_claims = ClaimSamplingBatchAssignment.objects.filter(claim_batch_id=claim_sampling_id)
         filters = [
-            ClaimSamplingBatchAssignment.Status.IDLE
+            ClaimSamplingBatchAssignmentStatus.IDLE
         ]
 
         if include_skip:
-            filters += ClaimSamplingBatchAssignment.Status.SKIPPED
+            filters += ClaimSamplingBatchAssignmentStatus.SKIPPED
 
         claim_assignments = assigned_claims.filter(status__in=filters)
         relevant_claims = Claim.objects \
@@ -207,8 +260,8 @@ class ClaimSamplingService(BaseService):
             not_selected -= 1
 
         # Create the matching number of claims
-        result_list = [ClaimSamplingBatchAssignment.Status.IDLE] * selected_for_review + \
-                      [ClaimSamplingBatchAssignment.Status.SKIPPED] * not_selected
+        result_list = [ClaimSamplingBatchAssignmentStatus.IDLE] * selected_for_review + \
+                      [ClaimSamplingBatchAssignmentStatus.SKIPPED] * not_selected
 
         # Shuffle the list to randomize the order
         random.shuffle(result_list)

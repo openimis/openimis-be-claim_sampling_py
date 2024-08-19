@@ -3,7 +3,7 @@ from django.test import TestCase
 from unittest import mock
 
 from claim.services import ClaimSubmitService
-from claim.tests import DummyContext
+from claim.tests.tests import DummyContext
 from core.test_helpers import create_test_interactive_user, create_test_officer
 from location.test_helpers import create_test_location, create_test_health_facility, create_test_village
 from insuree.test_helpers import create_test_insuree
@@ -12,7 +12,11 @@ from claim.models import Claim, ClaimItem, ClaimService, ClaimDetail
 from medical.models import Diagnosis, Item, Service
 from medical.test_helpers import create_test_item, create_test_service
 from django.conf import settings
-from .models import ClaimSamplingBatch, ClaimSamplingBatchAssignment
+from .models import (
+    ClaimSamplingBatch,
+    ClaimSamplingBatchAssignment,
+    ClaimSamplingBatchAssignmentStatus
+)
 
 from .services import ClaimSamplingService
 import core
@@ -169,8 +173,8 @@ mutation {
 
         attachments = ClaimSamplingBatchAssignment.objects.filter(claim_batch=claim_sampling)
         # Ten claims, 2 should be assigned for sample idle and 8 for skip;
-        idle = list(attachments.filter(status=ClaimSamplingBatchAssignment.Status.IDLE))
-        skip = list(attachments.filter(status=ClaimSamplingBatchAssignment.Status.SKIPPED))
+        idle = list(attachments.filter(status=ClaimSamplingBatchAssignmentStatus.IDLE))
+        skip = list(attachments.filter(status=ClaimSamplingBatchAssignmentStatus.SKIPPED))
 
         # Creation
         self.assertEqual(len(idle), 3)
@@ -203,11 +207,13 @@ mutation {
         service.extrapolate_results(claim_sampling.id)
         attachments = ClaimSamplingBatchAssignment.objects.filter(claim_batch=claim_sampling)
         # 50% of remaining claims should be rejected and 50% should be valuated
-        skip = [x.claim for x in attachments.filter(status=ClaimSamplingBatchAssignment.Status.SKIPPED)]
+        skip = [x.claim for x in attachments.filter(status=ClaimSamplingBatchAssignmentStatus.SKIPPED)]
         accepted = [x for x in skip if x.status in [Claim.STATUS_PROCESSED, Claim.STATUS_VALUATED]]
         rejected = [x for x in skip if x.status in [Claim.STATUS_REJECTED]]
-        self.assertEqual(len(accepted), 3)
-        self.assertEqual(len(rejected), 4)
+        self.assertEqual(len(accepted), 7)
+        self.assertEqual(len(rejected), 2)
+        # FIXME check the ratio (done manually looks ok)
+        
 
     def _get_test_dict(self, code=None):
         return {

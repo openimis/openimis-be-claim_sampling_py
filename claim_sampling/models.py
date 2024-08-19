@@ -13,12 +13,18 @@ class ClaimSamplingBatch(HistoryModel):
         return f"Claim Sampling - {self.date_created}"
 
 
-class ClaimSamplingBatchAssignment(HistoryModel):
-    class Status(models.TextChoices):
-        SKIPPED = "S"  # Claims Which Validation is based on sampling
-        IDLE = "I"  # Part of the sample
+class ClaimSamplingBatchAssignmentStatus(models.TextChoices):
+    SKIPPED = "S"  # Claims Which Validation is based on sampling
+    IDLE = "I"  # Part of the sample
 
-    claim = models.ForeignKey(Claim, models.DO_NOTHING, db_column='ClaimID', related_name="ClaimID")
+
+class ClaimSamplingBatchAssignment(HistoryModel):
+
+    claim = models.ForeignKey(Claim, models.DO_NOTHING, db_column='ClaimID', related_name="assignments")
     claim_batch = models.ForeignKey(ClaimSamplingBatch, models.DO_NOTHING, db_column='ClaimSamplingBatchID',
-                                    related_name="ClaimSamplingBatchID")
-    status = models.CharField(max_length=2, choices=Status.choices, default=Status.IDLE)
+                                    related_name="assignments")
+    status = models.CharField(
+        max_length=2,
+        choices=ClaimSamplingBatchAssignmentStatus.choices,
+        default=ClaimSamplingBatchAssignmentStatus.IDLE
+    )
