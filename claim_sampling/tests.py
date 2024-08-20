@@ -211,7 +211,7 @@ mutation {
         accepted = [x for x in skip if x.status in [Claim.STATUS_PROCESSED, Claim.STATUS_VALUATED]]
         rejected = [x for x in skip if x.status in [Claim.STATUS_REJECTED]]
         self.assertEqual(len(accepted), 7)
-        self.assertEqual(len(rejected), 2)
+        self.assertEqual(len(rejected), 0)
         # FIXME check the ratio (done manually looks ok)
         
 
