@@ -3,14 +3,26 @@ import uuid
 from typing import List
 
 from claim.apps import ClaimConfig
-from claim.models import Claim, ClaimItem, ClaimService
+from claim.models import (
+    Claim, ClaimItem, ClaimService, 
+)
+    
 from enum import Enum
-from django.db.models import OuterRef, Subquery, Avg, Q, Sum, F, ExpressionWrapper, DecimalField,  Subquery, OuterRef, Case, Value, When
+from django.db.models import (
+    OuterRef, Subquery, Avg, Q, Sum, F, ExpressionWrapper, 
+    FloatField, DecimalField,  Subquery, OuterRef, Case, Value, When
+)
 from django.db.models.functions import Coalesce
 from django.db import transaction
 from django.utils.translation import gettext as _
 
-from claim.services import set_claims_status, update_claims_dedrems, validate_and_process_dedrem_claim
+from claim.services import (
+    set_claims_status, update_claims_dedrems, processing_claim,
+)
+from claim.subqueries import (   
+    total_srv_adjusted_exp, total_itm_adjusted_exp,
+    total_srv_approved_exp, total_itm_approved_exp,elm_approved_exp,update_claim_approved, elm_adjusted_exp,elm_approved_exp
+)
 from claim_sampling.models import (
     ClaimSamplingBatch,
     ClaimSamplingBatchAssignment,
@@ -118,94 +130,38 @@ class ClaimSamplingService(BaseService):
         claim_sampling = ClaimSamplingBatch.objects.get(id=claim_sampling_id)
 
         qs = Claim.objects.filter(assignments__claim_batch=claim_sampling, *filter_validity())
-        # Subquery for total_itm_adjusted
-        total_itm_adjusted_subquery = Claim.objects.filter(id=OuterRef('id')).annotate(
-            total_itm_adjusted=Sum(
-                F("items__qty_provided") * Coalesce("items__price_adjusted", "items__price_asked")
-            )
-        ).values('total_itm_adjusted')[:1]
-
-        # Subquery for total_srv_adjusted
-        total_srv_adjusted_subquery = Claim.objects.filter(id=OuterRef('id')).annotate(
-            total_srv_adjusted=Sum(
-                F("services__qty_provided") * Coalesce("services__price_adjusted", "services__price_asked")
-            )
-        ).values('total_srv_adjusted')[:1]
-
-        # Subquery for total_itm_approved
-        total_itm_approved_subquery = Claim.objects.filter(id=OuterRef('id')).annotate(
-            total_itm_approved=Sum(
-                Case(
-                    When(status=Claim.STATUS_REJECTED, then=Value(0)),
-                    default=Coalesce("items__qty_approved", "items__qty_provided", 0) * 
-                        Coalesce("items__price_approved", "services__price_adjusted", "items__price_asked"),
-                    output_field=DecimalField()
-                )
-            )
-        ).values('total_itm_approved')[:1]
-
-        # Subquery for total_srv_approved
-        total_srv_approved_subquery = Claim.objects.filter(id=OuterRef('id')).annotate(
-            total_srv_approved=Sum(
-                Case(
-                    When(status=Claim.STATUS_REJECTED, then=Value(0)),
-                    default=Coalesce("services__qty_approved", "services__qty_provided", 0) *
-                    Coalesce("services__price_approved", "services__price_adjusted", "services__price_asked"),
-                    output_field=DecimalField()
-                )
-            )
-        ).values('total_srv_approved')[:1]
-
+        
         deductible = qs.filter(review_status=Claim.REVIEW_DELIVERED)\
-            .filter(Q(services__rejection_reason=-1) | Q(services__rejection_reason__isnull=True))\
-            .annotate(total_srv_adjusted=(total_srv_adjusted_subquery))\
-            .annotate(total_itm_adjusted=(total_itm_adjusted_subquery))\
-            .annotate(total_srv_approved=(total_srv_approved_subquery))\
-            .annotate(total_itm_approved=(total_itm_approved_subquery))\
+            .filter(Q(services__rejection_reason__lte=0) | Q(services__rejection_reason__isnull=True))\
+            .annotate(total_srv_adjusted=total_srv_adjusted_exp)\
+            .annotate(total_itm_adjusted=total_itm_adjusted_exp)\
+            .annotate(total_srv_approved=total_srv_approved_exp)\
+            .annotate(total_itm_approved=total_itm_approved_exp)\
             .aggregate(value=ExpressionWrapper(
                 (Sum("total_srv_approved") + Sum("total_itm_approved")) /
                 ( Sum("total_srv_adjusted") + Sum("total_itm_adjusted")),
                 output_field=DecimalField()
             ))["value"]
-                   
-        
-        qs_extrapolated = qs.filter(assignments__status=ClaimSamplingBatchAssignmentStatus.SKIPPED, review_status=Claim.REVIEW_SELECTED)
-        
-        # Subquery for total_itm_adjusted
-        total_itm_adjusted_subquery = Claim.objects.filter(id=OuterRef('id')).annotate(
-            total_itm_adjusted=Sum(
-                F("items__qty_provided") * Coalesce("items__price_adjusted", "items__price_asked")
-            )
-        ).values('total_itm_adjusted')[:1]
-
-        # Subquery for total_srv_adjusted
-        total_srv_adjusted_subquery = Claim.objects.filter(id=OuterRef('id')).annotate(
-            total_srv_adjusted=Sum(
-                F("services__qty_provided") * Coalesce("services__price_adjusted", "services__price_asked")
-            )
-        ).values('total_srv_adjusted')[:1]
 
         # Filter claims for extrapolation
-        qs_extrapolated = qs.filter(assignments__status=ClaimSamplingBatchAssignmentStatus.SKIPPED, review_status=Claim.REVIEW_IDLE)
-
-        # Update the claims using subqueries
-        qs_extrapolated.update(
-            review_status=Claim.REVIEW_BYPASSED,
-            approved=ExpressionWrapper(
-                deductible * (
-                    Coalesce(Subquery(total_itm_adjusted_subquery), 0) +
-                    Coalesce(Subquery(total_srv_adjusted_subquery), 0)
-                ),
-                output_field=DecimalField()
-            )
+        qs_extrapolated = qs.filter(
+            assignments__status=ClaimSamplingBatchAssignmentStatus.SKIPPED, 
+            review_status=Claim.REVIEW_IDLE
         )
+        
+        # update the items and services
+        deductible = float(deductible or 0)
+        
+
         # update service and item
         ClaimItem.objects.filter(claim__in=qs_extrapolated).update(price_approved=deductible * F("price_adjusted"))
         ClaimService.objects.filter(claim__in=qs_extrapolated).update(price_approved=deductible * F("price_adjusted"))
 
+        update_claim_approved(qs_extrapolated, updates={'review_status': Claim.REVIEW_BYPASSED})
+
         errors = []
-        for claim in qs:
-            errors += validate_and_process_dedrem_claim(claim, self.user, True)
+        for claim in qs.filter(status=Claim.STATUS_CHECKED):
+            errors += processing_claim(claim, self.user, True)
 
         return errors
 
