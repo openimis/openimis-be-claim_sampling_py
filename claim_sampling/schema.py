@@ -8,6 +8,7 @@ from django.conf import settings
 from claim_sampling.gql_queries import ClaimSamplingSummaryGQLType, ClaimSamplingBatchGQLType, ClaimSamplingBatchAssignmentGQLType
 from django.utils.translation import gettext as _
 from claim_sampling.gql_mutations import *  # lgtm [py/polluting-import]
+from django.core.exceptions import PermissionDenied
 
 from claim_sampling.models import ClaimSamplingBatch, ClaimSamplingBatchAssignment
 from claim.models import Claim
