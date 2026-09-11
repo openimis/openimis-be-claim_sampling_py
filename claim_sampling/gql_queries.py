@@ -8,7 +8,6 @@ from django.core.exceptions import PermissionDenied
 
 
 class ClaimSamplingBatchGQLType(DjangoObjectType):
-    attachments_count = graphene.Int()
     client_mutation_id = graphene.String()
 
     class Meta:
@@ -27,7 +26,6 @@ class ClaimSamplingBatchGQLType(DjangoObjectType):
             "claimed": ["exact", "lt", "lte", "gt", "gte"],
             "approved": ["exact", "lt", "lte", "gt", "gte"],
             "visit_type": ["exact"],
-            "attachments_count__value": ["exact", "lt", "lte", "gt", "gte"],
         }
         connection_class = ExtendedConnection
 
@@ -67,7 +65,6 @@ class ClaimSamplingBatchAssignmentGQLType(DjangoObjectType):
             "claimed": ["exact", "lt", "lte", "gt", "gte"],
             "approved": ["exact", "lt", "lte", "gt", "gte"],
             "visit_type": ["exact"],
-            "attachments_count__value": ["exact", "lt", "lte", "gt", "gte"],
         }
         connection_class = ExtendedConnection
 
