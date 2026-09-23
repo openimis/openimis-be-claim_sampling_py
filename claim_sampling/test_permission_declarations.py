@@ -1,21 +1,21 @@
 """
-Garde-fous sur la declaration des droits de claim_sampling.
+Guard rails on claim_sampling's rights declaration.
 
-Meme structure que `claim` : `DJANGO_PERMS` par entite puis par action, `_PERM_CFG` qui
-en derive les cles de config, et `ClaimSamplingBatch.get_rights` qui n'est qu'un point
-d'acces.
+Same structure as `claim`: `DJANGO_PERMS` by entity then by action, `_PERM_CFG`
+deriving the config keys from it, and `ClaimSamplingBatch.get_rights` which is only an
+access point.
 
-Ce qui est verrouille ici, c'est le couple entite/action, pas seulement les valeurs :
-  * un identifiant a un seul endroit (DJANGO_PERMS), donc pas de derive entre le
-    DEFAULT_CFG et le controle ;
-  * une cle de config sans attribut de classe n'est jamais chargee par `__load_config`
-    et sa lecture leve AttributeError - le droit devient inapplicable ;
-  * `has_perms([])` renvoie True, donc une liste vide accorde a tous ;
-  * un identifiant absent de `permissions_map.json` n'est accordable a aucun role, donc
-    la fonctionnelle qu'il garde devient injoignable au lieu d'etre protegee.
+What is locked down here is the entity/action pair, not only the values:
+  * an identifier in one place only (DJANGO_PERMS), hence no drift between the
+    DEFAULT_CFG and the check;
+  * a config key with no class attribute is never loaded by `__load_config` and
+    reading it raises AttributeError - the right becomes unenforceable;
+  * `has_perms([])` returns True, so an empty list grants to everybody;
+  * an identifier missing from `permissions_map.json` is grantable to no role, so the
+    feature it guards becomes unreachable instead of protected.
 
-Le fichier est pose a plat plutot que dans un paquet `tests/` : le module a deja un
-`tests.py`, qu'un paquet du meme nom masquerait.
+The file sits flat rather than in a `tests/` package: the module already has a
+`tests.py`, which a package of the same name would shadow.
 """
 
 import json
@@ -43,8 +43,8 @@ EXPECTED_RIGHTS = {
     "gql_mutation_approve_claim_batch_samplings_perms": ["126004"],
 }
 
-# Le catalogue de l'assemblage, pas celui du paquet : les modules sont installes depuis
-# un arbre separe, donc on le resout depuis BASE_DIR.
+# The assembly's catalogue, not the package's: the modules are installed from a
+# separate tree, so it is resolved from BASE_DIR.
 PERMISSIONS_MAP = Path(settings.BASE_DIR) / "permissions_map.json"
 
 
@@ -83,9 +83,9 @@ class ClaimSamplingPermissionDeclarationTestCase(TestCase):
 
     def test_no_right_id_is_shared(self):
         """
-        Les quatre droits du module sont distincts. Un partage est possible en soi -
-        `RightPermission.right_id` n'est pas unique - mais il doit etre une decision
-        ecrite, pas le resultat d'un copier-coller.
+        The module's four rights are distinct. Sharing is possible in itself -
+        `RightPermission.right_id` is not unique - but it has to be a written decision,
+        not the result of a copy-paste.
         """
         seen = {}
         for entity, actions in DJANGO_PERMS.items():
@@ -104,8 +104,8 @@ class ClaimSamplingPermissionDeclarationTestCase(TestCase):
 
     def test_every_right_id_is_in_the_permissions_map(self):
         """
-        La carte est ce depuis quoi le solution builder seme les roles : un identifiant
-        qui n'y est pas ne peut etre accorde a personne.
+        The map is what the solution builder seeds the roles from: an identifier that
+        is not in it can be granted to nobody.
         """
         catalog = set(json.loads(PERMISSIONS_MAP.read_text(encoding="utf-8")).values())
         missing = sorted(
@@ -154,9 +154,9 @@ class ClaimSamplingPermissionDeclarationTestCase(TestCase):
 
     def test_assignment_declares_the_batch_as_its_scope_parent(self):
         """
-        Une assignation n'a pas de droit propre : elle emprunte celui du lot. Le champ
-        doit designer une relation reelle, sinon `core.rights_scope` ne remonte rien et
-        refuse tout.
+        An assignment has no right of its own: it borrows the batch's. The field has to
+        denote a real relation, otherwise `core.rights_scope` walks up to nothing and
+        refuses everything.
         """
         self.assertEqual(ClaimSamplingBatchAssignment.scope_parent, "claim_batch")
         field = ClaimSamplingBatchAssignment._meta.get_field("claim_batch")

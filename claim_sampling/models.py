@@ -15,13 +15,13 @@ class ClaimSamplingBatch(HistoryModel):
     @classmethod
     def get_rights(cls, action):
         """
-        Les droits regissant une action sur cette entite, pour GraphQL et REST.
+        The rights governing an action on this entity, for GraphQL and REST.
 
-        Ne redeclare rien : la table des droits est `claim_sampling.apps.DJANGO_PERMS`,
-        par entite puis par action, et `configured_perms` y lit la valeur *configuree* -
-        celle que ModuleConfiguration a pu surcharger - et non le defaut declare. La
-        lecture se fait ici a l'appel et non a l'import, car les attributs `_perms` ne
-        valent leur valeur qu'apres `ready()`.
+        Redeclares nothing: the rights table is `claim_sampling.apps.DJANGO_PERMS`, by
+        entity then by action, and `configured_perms` reads the *configured* value
+        there - the one ModuleConfiguration may have overridden - and not the declared
+        default. The read happens here at call time and not at import time, because the
+        `_perms` attributes only hold their value after `ready()`.
         """
         from claim_sampling.apps import configured_perms
 
@@ -34,10 +34,10 @@ class ClaimSamplingBatchAssignmentStatus(models.TextChoices):
 
 
 class ClaimSamplingBatchAssignment(HistoryModel):
-    # Une assignation est une ligne du lot d'echantillonnage : personne n'y detient de
-    # droit propre, la modifier c'est modifier le lot. Le parent est declare et non
-    # deduit - `claim` est une cle etrangere tout autant, mais une reclamation ne
-    # gouverne pas qui peut l'echantillonner ; c'est le lot qui le fait.
+    # An assignment is a row of the sampling batch: nobody holds a right of their own
+    # on it, and modifying it means modifying the batch. The parent is declared and not
+    # inferred - `claim` is just as much a foreign key, but a claim does not govern who
+    # may sample it; the batch does.
     scope_parent = "claim_batch"
 
     claim = models.ForeignKey(Claim, models.DO_NOTHING, db_column='ClaimID', related_name="assignments")

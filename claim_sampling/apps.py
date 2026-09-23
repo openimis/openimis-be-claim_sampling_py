@@ -5,17 +5,17 @@ from core.rights_declaration import RightsDeclaration
 MODULE_NAME = 'claim_sampling'
 
 
-# Droits, par entite puis par action.
+# Rights, by entity then by action.
 #
-# L'entite est nommee d'apres le modele qui la porte (`ClaimSamplingBatch`) et non
-# d'apres les cles de config, qui disent "claim_batch_samplings" - un ordre de mots
-# herite, qui ne designe aucun objet du module.
+# The entity is named after the model that carries it (`ClaimSamplingBatch`) and not
+# after the config keys, which say "claim_batch_samplings" - an inherited word order,
+# denoting no object of this module.
 #
-# `approve` est une action metier, pas un `update` : approuver une campagne
-# d'echantillonnage applique le taux de deduction a toutes les reclamations du lot
-# (cf. ApproveClaimSamplingBatchMutation), ce qui n'est pas la meme autorisation que
-# corriger le lot lui-meme. Elle garde donc son propre identifiant, et son nom django
-# reste declaratif tant que `Meta.permissions` ne la declare pas.
+# `approve` is a business action, not an `update`: approving a sampling campaign
+# applies the deduction rate to every claim in the batch (see
+# ApproveClaimSamplingBatchMutation), which is not the same authorisation as correcting
+# the batch itself. It therefore keeps its own identifier, and its django name stays
+# declarative as long as `Meta.permissions` does not declare it.
 DJANGO_PERMS = {
     "claimSamplingBatch": {
         "query": ("claim_sampling.view_claimsamplingbatch", 126001),
