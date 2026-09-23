@@ -90,8 +90,10 @@ class CreateClaimSamplingBatchMutation(OpenIMISMutation):
         try:
             if type(user) is AnonymousUser or not user.id:
                 raise ValidationError(_("mutation.authentication_required"))
-            # if not user.has_perms(ClaimSamplingConfig.gql_mutation_create_claim_batch_samplings_perms):
-            #     raise PermissionDenied(_("unauthorized"))
+            if not user.has_perms(
+                ClaimSamplingConfig.gql_mutation_create_claim_batch_samplings_perms
+            ):
+                raise PermissionDenied(_("unauthorized"))
             if "client_mutation_id" in data:
                 data.pop('client_mutation_id')
             if "client_mutation_label" in data:
