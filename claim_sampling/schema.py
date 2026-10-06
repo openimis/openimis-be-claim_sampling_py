@@ -38,10 +38,7 @@ class Query(graphene.ObjectType):
     )
 
     def resolve_claim_sampling_batch(self, info, **kwargs):
-        if (
-            not info.context.user.has_perms(ClaimSamplingConfig.gql_query_claim_batch_samplings_perms)
-            and settings.ROW_SECURITY
-        ):
+        if not info.context.user.has_perms(ClaimSamplingConfig.gql_query_claim_batch_samplings_perms):
             raise PermissionDenied(_("unauthorized"))
 
         claim_sampling_batch_id = kwargs.get("id", None)
@@ -49,10 +46,7 @@ class Query(graphene.ObjectType):
         return ClaimSamplingBatch.objects.get(id=claim_sampling_batch_id, validity_to__isnull=True)
 
     def resolve_claim_sampling_batch_assignment(self, info, **kwargs):
-        if (
-            not info.context.user.has_perms(ClaimSamplingConfig.gql_query_claim_batch_samplings_perms)
-            and settings.ROW_SECURITY
-        ):
+        if not info.context.user.has_perms(ClaimSamplingConfig.gql_query_claim_batch_samplings_perms):
             raise PermissionDenied(_("unauthorized"))
 
         claim_sampling_batch_assignment_id = kwargs.get("id", None)
@@ -60,10 +54,7 @@ class Query(graphene.ObjectType):
         return ClaimSamplingBatchAssignment.objects.get(id=claim_sampling_batch_assignment_id, validity_to__isnull=True)
 
     def resolve_sampling_batch_claims(self, info, **kwargs):
-        if (
-            not info.context.user.has_perms(ClaimSamplingConfig.gql_query_claim_batch_samplings_perms)
-            and settings.ROW_SECURITY
-        ):
+        if not info.context.user.has_perms(ClaimSamplingConfig.gql_query_claim_batch_samplings_perms):
             raise PermissionDenied(_("unauthorized"))
 
         sampling = ClaimSamplingBatch.objects.get(uuid=kwargs['claim_sampling_id'])
