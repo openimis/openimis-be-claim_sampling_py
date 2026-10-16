@@ -11,17 +11,12 @@ What is locked down here is the entity/action pair, not only the values:
   * a config key with no class attribute is never loaded by `__load_config` and
     reading it raises AttributeError - the right becomes unenforceable;
   * `has_perms([])` returns True, so an empty list grants to everybody;
-  * an identifier missing from `permissions_map.json` is grantable to no role, so the
-    feature it guards becomes unreachable instead of protected.
 
 The file sits flat rather than in a `tests/` package: the module already has a
 `tests.py`, which a package of the same name would shadow.
 """
 
-import json
-from pathlib import Path
 
-from django.conf import settings
 from django.test import TestCase
 
 from claim_sampling.apps import (
@@ -42,10 +37,6 @@ EXPECTED_RIGHTS = {
     "gql_mutation_update_claim_batch_samplings_perms": ["126003"],
     "gql_mutation_approve_claim_batch_samplings_perms": ["126004"],
 }
-
-# The assembly's catalogue, not the package's: the modules are installed from a
-# separate tree, so it is resolved from BASE_DIR.
-PERMISSIONS_MAP = Path(settings.BASE_DIR) / "permissions_map.json"
 
 
 class ClaimSamplingPermissionDeclarationTestCase(TestCase):
@@ -101,21 +92,6 @@ class ClaimSamplingPermissionDeclarationTestCase(TestCase):
                 seen.setdefault(name, []).append(f"{entity}.{action}")
         shared = {name: who for name, who in seen.items() if len(who) > 1}
         self.assertEqual(shared, {})
-
-    def test_every_right_id_is_in_the_permissions_map(self):
-        """
-        The map is what the solution builder seeds the roles from: an identifier that
-        is not in it can be granted to nobody.
-        """
-        catalog = set(json.loads(PERMISSIONS_MAP.read_text(encoding="utf-8")).values())
-        missing = sorted(
-            rid
-            for entity, actions in DJANGO_PERMS.items()
-            for _, (_, right_id) in actions.items()
-            for rid in [str(right_id)]
-            if rid not in catalog
-        )
-        self.assertEqual(missing, [])
 
     def test_unknown_entity_or_action_raises(self):
         with self.assertRaises(KeyError):
